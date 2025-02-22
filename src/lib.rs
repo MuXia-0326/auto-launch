@@ -73,7 +73,8 @@
 //!     let app_name = "the-app";
 //!     let app_path = "C:\\path\\to\\the-app.exe";
 //!     let args = &["--minimized"];
-//!     let auto = AutoLaunch::new(app_name, app_path, args);
+//!     let with_admin = false;
+//!     let auto = AutoLaunch::new(app_name, app_path, args, with_admin);
 //!
 //!     // enable the auto launch
 //!     auto.enable().is_ok();
@@ -177,7 +178,8 @@ mod windows;
 /// # let app_name = "the-app";
 /// # let app_path = "/path/to/the-app";
 /// # let args = &["--minimized"];
-/// AutoLaunch::new(app_name, app_path, args);
+/// # let with_admin = false;
+/// AutoLaunch::new(app_name, app_path, args, with_admin);
 /// # }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,12 +190,17 @@ pub struct AutoLaunch {
     /// The application executable path (absolute path will be better)
     pub(crate) app_path: String,
 
+    /// Args passed to the binary on startup
+    pub(crate) args: Vec<String>,
+
     #[cfg(target_os = "macos")]
     /// Whether use Launch Agent for implement or use AppleScript
     pub(crate) use_launch_agent: bool,
 
-    /// Args passed to the binary on startup
-    pub(crate) args: Vec<String>,
+    #[cfg(target_os = "windows")]
+    /// Whether to register the in `HKEY_LOCAL_MACHINE` for auto launching the app as admin,
+    /// note this will require admin or else it will fail
+    pub(crate) with_admin: bool,
 }
 
 impl AutoLaunch {
@@ -267,6 +274,9 @@ pub struct AutoLaunchBuilder {
     pub use_launch_agent: bool,
 
     pub args: Option<Vec<String>>,
+
+    #[cfg(target_os = "windows")]
+    pub with_admin: bool,
 }
 
 impl AutoLaunchBuilder {
@@ -286,6 +296,12 @@ impl AutoLaunchBuilder {
         self
     }
 
+    /// Set the args
+    pub fn set_args(&mut self, args: &[impl AsRef<str>]) -> &mut Self {
+        self.args = Some(args.iter().map(|s| s.as_ref().to_string()).collect());
+        self
+    }
+
     /// Set the `use_launch_agent`
     /// This setting only works on macOS
     pub fn set_use_launch_agent(&mut self, use_launch_agent: bool) -> &mut Self {
@@ -293,9 +309,11 @@ impl AutoLaunchBuilder {
         self
     }
 
-    /// Set the args
-    pub fn set_args(&mut self, args: &[impl AsRef<str>]) -> &mut Self {
-        self.args = Some(args.iter().map(|s| s.as_ref().to_string()).collect());
+    /// Whether to register the in `HKEY_LOCAL_MACHINE` for auto launching the app as admin,
+    /// note this will require admin or else it will fail
+    #[cfg(target_os = "windows")]
+    pub fn with_admin(&mut self, with_admin: bool) -> &mut Self {
+        self.with_admin = with_admin;
         self
     }
 
@@ -305,9 +323,6 @@ impl AutoLaunchBuilder {
     ///
     /// - `app_name` is none
     /// - `app_path` is none
-    ///
-    /// ## Panics
-    ///
     /// - Unsupported target OS
     pub fn build(&self) -> Result<AutoLaunch> {
         let app_name = self.app_name.as_ref().ok_or(Error::AppNameNotSpecified)?;
@@ -324,7 +339,7 @@ impl AutoLaunchBuilder {
             &args,
         ));
         #[cfg(target_os = "windows")]
-        return Ok(AutoLaunch::new(app_name, app_path, &args));
+        return Ok(AutoLaunch::new(app_name, app_path, &args, self.with_admin));
 
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         return Err(Error::UnsupportedOS);
